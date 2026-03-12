@@ -100,10 +100,16 @@
       padding: 20px 24px 60px;
       display: grid;
       grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto;
       gap: 28px;
     }
+    .stats-bar   { grid-column: 1 / -1; }
+    .card-upload { grid-column: 1; }
+    .card-library { grid-column: 1; }
+    .card-nfc    { grid-column: 2; grid-row: 2 / 4; }
     @media (max-width: 720px) {
       main { grid-template-columns: 1fr; }
+      .card-nfc { grid-column: 1; grid-row: auto; }
     }
 
     /* ── Cards ── */
@@ -360,6 +366,82 @@
     .card:nth-child(2) { animation-delay: 0.1s; }
     .card:nth-child(3) { animation-delay: 0.2s; }
     .card:nth-child(4) { animation-delay: 0.3s; }
+    /* ── Modal NFC ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      backdrop-filter: blur(4px);
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      animation: fadein 0.2s;
+    }
+    .modal-box {
+      background: white;
+      border-radius: 28px;
+      padding: 36px 32px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.25);
+      text-align: center;
+      animation: pop 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .modal-icon {
+      font-size: 3.5rem;
+      margin-bottom: 12px;
+      display: block;
+    }
+    .modal-title {
+      font-family: 'Fredoka One', cursive;
+      font-size: 1.6rem;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .modal-subtitle {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 0.88rem;
+      font-family: monospace;
+      margin-bottom: 4px;
+    }
+    .modal-select {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 2px solid #E8E8E8;
+      font-family: 'Nunito', sans-serif;
+      font-size: 0.92rem;
+      font-weight: 700;
+      background: white;
+      color: var(--text);
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239A9A9A' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 40px;
+      text-align: left;
+    }
+    .modal-select:focus { outline: none; border-color: var(--sky); }
+    .modal-current-assignment {
+      background: #F0F9F1;
+      border: 2px solid var(--mint);
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #2A7A3B;
+      margin-bottom: 4px;
+      text-align: left;
+    }
+    @keyframes scanning-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50%       { transform: scale(1.15); opacity: 0.7; }
+    }
+    .scanning-pulse { animation: scanning-pulse 1.2s ease-in-out infinite; display: inline-block; }
   </style>
 </head>
 <body>
@@ -396,7 +478,7 @@
   </div>
 
   <!-- Card: Subir audio -->
-  <div class="card yellow" style="animation-delay:0.05s">
+  <div class="card yellow card-upload" style="animation-delay:0.05s">
     <div class="card-title">
       <span class="icon">🎵</span> Subir audio
     </div>
@@ -404,7 +486,7 @@
     <div class="upload-zone" id="uploadZone">
       <div class="upload-icon">☁️</div>
       <p>Arrastra tu archivo aquí</p>
-      <small>o haz clic para seleccionar tu archivo de audio </small>
+      <small>o haz clic para seleccionar · MP3, WAV, OGG, M4A</small>
       <input type="file" id="fileInput" accept=".mp3,.wav,.ogg,.m4a" multiple />
     </div>
     <div class="progress-wrap" id="progressWrap">
@@ -416,7 +498,7 @@
   </div>
 
   <!-- Card: Biblioteca de audios -->
-  <div class="card coral" style="animation-delay:0.1s">
+  <div class="card coral card-library" style="animation-delay:0.1s">
     <div class="card-title">
       <span class="icon">🎼</span> Biblioteca
     </div>
@@ -428,48 +510,85 @@
     </div>
   </div>
 
-  <!-- Card: Etiquetas NFC -->
-  <div class="card mint" style="animation-delay:0.15s">
+  <!-- Card: Etiquetas NFC + Asignaciones -->
+  <div class="card mint card-nfc" style="animation-delay:0.15s;display:flex;flex-direction:column;">
     <div class="card-title">
       <span class="icon">📡</span> Etiquetas NFC
     </div>
-    <div class="add-nfc-form">
-      <input type="text" id="nfcUidInput" placeholder="UID de la etiqueta (ej: A1:B2:C3:D4)" maxlength="30" />
-      <button class="btn btn-mint btn-sm" onclick="addNfcTag()">＋ Añadir</button>
-    </div>
-    <div class="nfc-list" id="nfcList">
+
+    <button class="btn btn-mint btn-full" id="btnScan" onclick="startScan()" style="margin-bottom:16px;">
+      📡 Escanear etiqueta NFC
+    </button>
+
+    <div class="nfc-list" id="nfcList" style="flex:1;max-height:none;">
       <div class="empty-state">
         <span>📡</span>
-        Sin etiquetas NFC.<br>Añade el UID de tu tag.
+        Sin etiquetas NFC.<br>Escanea tu primer tag.
       </div>
     </div>
-  </div>
 
-  <!-- Card: Guardar asignaciones -->
-  <div class="card sky" style="animation-delay:0.2s">
-    <div class="card-title">
-      <span class="icon">💾</span> Guardar cambios
-    </div>
-    <p style="color:var(--muted);font-weight:600;font-size:0.92rem;line-height:1.6;margin-bottom:18px;">
-      Cuando hayas asignado los audios a las etiquetas NFC, guarda la configuración para que la RPi la cargue al reproducir.
-    </p>
-    <button class="btn btn-sky btn-full" onclick="saveAssignments()" style="font-size:1rem;padding:14px;">
-      💾 Guardar configuración
-    </button>
     <div id="lastSaved" style="text-align:center;margin-top:12px;font-size:0.8rem;color:var(--muted);font-weight:600;"></div>
-
-    <div style="margin-top:24px;padding-top:20px;border-top:2px dashed #EEE;">
-      <div class="card-title" style="font-size:1.1rem;margin-bottom:12px;">
-        <span class="icon" style="background:#F5F5F5;width:32px;height:32px;font-size:1rem;">📋</span>
-        Asignaciones actuales
-      </div>
-      <div id="summaryList" style="font-size:0.85rem;color:var(--muted);font-weight:600;">
-        Sin asignaciones aún.
-      </div>
-    </div>
   </div>
 
 </main>
+
+<!-- ── Modal de escaneo NFC ───────────────────────────────── -->
+<div id="nfcModal" class="modal-overlay" style="display:none;" onclick="handleModalOverlayClick(event)">
+  <div class="modal-box">
+
+    <!-- Estado: escuchando -->
+    <div id="modalScanning">
+      <div class="modal-icon scanning-pulse">📡</div>
+      <h2 class="modal-title">Esperando tag NFC...</h2>
+      <p class="modal-subtitle">Acerca la etiqueta al lector</p>
+      <button class="btn btn-coral btn-full" style="margin-top:24px;" onclick="stopScan()">
+        ✕ Cancelar
+      </button>
+    </div>
+
+    <!-- Estado: tag nuevo -->
+    <div id="modalNew" style="display:none;">
+      <div class="modal-icon">🆕</div>
+      <h2 class="modal-title">¡Etiqueta nueva!</h2>
+      <p class="modal-subtitle" id="modalNewUid"></p>
+      <div style="margin:20px 0;">
+        <label style="font-weight:800;font-size:0.88rem;display:block;margin-bottom:8px;">Asignar audio:</label>
+        <select id="modalNewSelect" class="modal-select">
+          <option value="">— Sin asignar —</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-coral" style="flex:1;" onclick="cancelModal()">✕ Cancelar</button>
+        <button class="btn btn-mint" style="flex:1;" onclick="confirmNew()">✅ Confirmar</button>
+      </div>
+    </div>
+
+    <!-- Estado: tag ya asignado -->
+    <div id="modalExisting" style="display:none;">
+      <div class="modal-icon">✏️</div>
+      <h2 class="modal-title">Etiqueta conocida</h2>
+      <p class="modal-subtitle" id="modalExistingUid"></p>
+      <div class="modal-current-assignment" id="modalCurrentAssignment"></div>
+      <div style="margin:16px 0;">
+        <label style="font-weight:800;font-size:0.88rem;display:block;margin-bottom:8px;">Cambiar a:</label>
+        <select id="modalExistingSelect" class="modal-select"></select>
+      </div>
+      <div id="modalConfirmChange" style="display:none;background:#FFF3C4;border-radius:12px;padding:14px;margin-bottom:16px;border:2px solid var(--yellow);">
+        <p style="font-weight:700;font-size:0.88rem;color:#6B4C00;margin-bottom:10px;">⚠️ ¿Confirmas el cambio?</p>
+        <p style="font-size:0.82rem;color:#8A6500;" id="modalConfirmText"></p>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="btn btn-sm" style="flex:1;background:#EEE;color:#555;" onclick="hideConfirm()">No, cancelar</button>
+          <button class="btn btn-yellow btn-sm" style="flex:1;" onclick="confirmChange()">Sí, cambiar</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-coral" style="flex:1;" onclick="cancelModal()">✕ Cerrar</button>
+        <button class="btn btn-sky" style="flex:1;" onclick="requestConfirmChange()">💾 Aplicar cambio</button>
+      </div>
+    </div>
+
+  </div>
+</div>
 
 <!-- Toast -->
 <div id="toast"></div>
@@ -516,10 +635,10 @@
 
   function handleFiles(files) {
     [...files].forEach(file => {
-      const allowed = ['audio/mpeg','audio/wav','audio/ogg','audio/mp3','audio/m4a'];
+      const allowed = ['audio/mpeg','audio/wav','audio/ogg','audio/mp3'];
       const ext = file.name.split('.').pop().toLowerCase();
       if (!['mp3','wav','ogg','m4a'].includes(ext)) {
-        showToast('⚠️ Solo se permiten MP3, WAV , M4A u OGG');
+        showToast('⚠️ Solo se permiten MP3, WAV, OGG o M4A');
         return;
       }
       if (audios.find(a => a.name === file.name)) {
@@ -619,27 +738,10 @@
   }
 
   // ── NFC Tags ────────────────────────────────────────────────
-  function addNfcTag() {
-    const input = document.getElementById('nfcUidInput');
-    const uid   = input.value.trim().toUpperCase();
-    if (!uid) { showToast('⚠️ Escribe el UID de la etiqueta'); return; }
-    if (nfcTags.find(t => t.uid === uid)) { showToast('⚠️ Esta etiqueta ya existe'); return; }
-    nfcTags.push({ uid, audio: '', name: 'Tag ' + (nfcTags.length + 1) });
-    input.value = '';
-    renderNfc();
-    updateStats();
-    showToast('📡 Etiqueta ' + uid + ' añadida');
-  }
-
-  document.getElementById('nfcUidInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') addNfcTag();
-  });
-
   function renderNfc() {
     const list = document.getElementById('nfcList');
     if (nfcTags.length === 0) {
-      list.innerHTML = `<div class="empty-state"><span>📡</span>Sin etiquetas NFC.<br>Añade el UID de tu tag.</div>`;
-      updateSummary();
+      list.innerHTML = `<div class="empty-state"><span>📡</span>Sin etiquetas NFC.<br>Escanea tu primer tag.</div>`;
       return;
     }
     list.innerHTML = nfcTags.map((t, i) => `
@@ -649,27 +751,19 @@
           <span class="nfc-uid">${t.uid}</span>
           <button class="btn-delete" onclick="deleteNfc(${i})" title="Eliminar">✕</button>
         </div>
-        <select onchange="assignAudio(${i}, this.value)">
-          <option value="">— Sin asignar —</option>
-          ${audios.map(a => `<option value="${a.name}" ${t.audio===a.name?'selected':''}>${a.name}</option>`).join('')}
-        </select>
+        <div style="font-size:0.85rem;font-weight:700;color:${t.audio ? 'var(--sky)' : 'var(--muted)'};">
+          ${t.audio ? '🎵 ' + t.audio : '— Sin asignar —'}
+        </div>
       </div>
     `).join('');
-    updateSummary();
   }
 
-  function deleteNfc(i) {
+  async function deleteNfc(i) {
     nfcTags.splice(i, 1);
+    await persistAssignments();
     renderNfc();
     updateStats();
     showToast('🗑️ Etiqueta eliminada');
-  }
-
-  function assignAudio(nfcIdx, audioName) {
-    nfcTags[nfcIdx].audio = audioName;
-    updateStats();
-    updateSummary();
-    if (audioName) showToast('🔗 Audio asignado a ' + nfcTags[nfcIdx].uid);
   }
 
   function updateNfcSelects() {
@@ -684,26 +778,8 @@
     document.getElementById('stat-assigned').textContent = assigned + ' asignación' + (assigned!==1?'es':'');
   }
 
-  // ── Summary ─────────────────────────────────────────────────
-  function updateSummary() {
-    const el = document.getElementById('summaryList');
-    const assigned = nfcTags.filter(t => t.audio);
-    if (assigned.length === 0) {
-      el.innerHTML = 'Sin asignaciones aún.';
-      return;
-    }
-    el.innerHTML = assigned.map(t => `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;background:#F8F8F8;padding:8px 12px;border-radius:10px;">
-        <span style="font-size:1rem">📡</span>
-        <span style="font-family:monospace;font-size:0.8rem;color:#555">${t.uid}</span>
-        <span style="color:#CCC">→</span>
-        <span style="color:var(--sky);font-weight:800;font-size:0.85rem">🎵 ${t.audio}</span>
-      </div>
-    `).join('');
-  }
-
-  // ── Guardar ─────────────────────────────────────────────────
-  async function saveAssignments() {
+  // ── Persistir asignaciones (se llama automáticamente) ───────
+  async function persistAssignments() {
     const config = {
       assignments: Object.fromEntries(nfcTags.filter(t => t.audio).map(t => [t.uid, t.audio]))
     };
@@ -717,12 +793,9 @@
         const now = new Date();
         document.getElementById('lastSaved').textContent =
           '✅ Guardado a las ' + now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
-        showToast('💾 Configuración guardada');
-      } else {
-        showToast('❌ Error al guardar');
       }
     } catch(e) {
-      showToast('❌ No se pudo conectar con el servidor');
+      showToast('❌ No se pudo guardar en el servidor');
     }
   }
 
@@ -734,6 +807,136 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  // ── Modal NFC scan ──────────────────────────────────────────
+  let scanInterval  = null;
+  let scannedUid    = null;
+  let scannedAudio  = null;
+
+  function showModal()  { document.getElementById('nfcModal').style.display = 'flex'; }
+  function hideModal()  { document.getElementById('nfcModal').style.display = 'none'; }
+
+  function showModalPanel(id) {
+    ['modalScanning','modalNew','modalExisting'].forEach(p =>
+      document.getElementById(p).style.display = p === id ? 'block' : 'none'
+    );
+  }
+
+  function handleModalOverlayClick(e) {
+    if (e.target === document.getElementById('nfcModal')) stopScan();
+  }
+
+  async function startScan() {
+    showModal();
+    showModalPanel('modalScanning');
+    try {
+      await fetch('/api/nfc/scan/start', { method: 'POST' });
+      scanInterval = setInterval(pollScanResult, 600);
+    } catch(e) {
+      showToast('❌ No se pudo iniciar el escaneo');
+      hideModal();
+    }
+  }
+
+  async function stopScan() {
+    clearInterval(scanInterval);
+    scanInterval = null;
+    await fetch('/api/nfc/scan/stop', { method: 'POST' }).catch(() => {});
+    hideModal();
+  }
+
+  async function pollScanResult() {
+    try {
+      const res  = await fetch('/api/nfc/scan/result');
+      const data = await res.json();
+
+      if (data.result?.error) {
+        clearInterval(scanInterval);
+        showToast('❌ Error lector: ' + data.result.error);
+        hideModal();
+        return;
+      }
+
+      if (data.result && data.result.uid) {
+        clearInterval(scanInterval);
+        scanInterval = null;
+        scannedUid   = data.result.uid;
+        scannedAudio = data.result.audio || '';
+
+        if (data.result.already_assigned) {
+          showExistingModal(scannedUid, scannedAudio);
+        } else {
+          showNewModal(scannedUid);
+        }
+      }
+    } catch(e) { /* red momentáneamente caída, reintenta en el próximo tick */ }
+  }
+
+  function showNewModal(uid) {
+    document.getElementById('modalNewUid').textContent = 'UID: ' + uid;
+    const sel = document.getElementById('modalNewSelect');
+    sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+      audios.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+    showModalPanel('modalNew');
+  }
+
+  function showExistingModal(uid, currentAudio) {
+    document.getElementById('modalExistingUid').textContent = 'UID: ' + uid;
+    document.getElementById('modalCurrentAssignment').innerHTML =
+      '🎵 Actualmente asignado a: <strong>' + (currentAudio || 'ninguno') + '</strong>';
+    const sel = document.getElementById('modalExistingSelect');
+    sel.innerHTML = '<option value="">— Sin asignar —</option>' +
+      audios.map(a => `<option value="${a.name}" ${a.name === currentAudio ? 'selected' : ''}>${a.name}</option>`).join('');
+    document.getElementById('modalConfirmChange').style.display = 'none';
+    showModalPanel('modalExisting');
+  }
+
+  async function confirmNew() {
+    const audio = document.getElementById('modalNewSelect').value;
+    applyAssignment(scannedUid, audio);
+    hideModal();
+    await persistAssignments();
+    showToast('✅ ' + scannedUid + (audio ? ' → ' + audio : ' guardado sin audio'));
+  }
+
+  function requestConfirmChange() {
+    const newAudio = document.getElementById('modalExistingSelect').value;
+    const oldAudio = scannedAudio;
+    if (newAudio === oldAudio) { showToast('ℹ️ No hay cambios'); return; }
+    const from = oldAudio || 'ninguno';
+    const to   = newAudio || 'ninguno';
+    document.getElementById('modalConfirmText').textContent =
+      'Cambiar de "' + from + '" → "' + to + '"';
+    document.getElementById('modalConfirmChange').style.display = 'block';
+  }
+
+  function hideConfirm() {
+    document.getElementById('modalConfirmChange').style.display = 'none';
+  }
+
+  async function confirmChange() {
+    const newAudio = document.getElementById('modalExistingSelect').value;
+    applyAssignment(scannedUid, newAudio);
+    hideModal();
+    await persistAssignments();
+    showToast('✅ Asignación actualizada para ' + scannedUid);
+  }
+
+  function cancelModal() {
+    stopScan();
+    hideModal();
+  }
+
+  function applyAssignment(uid, audio) {
+    const existing = nfcTags.findIndex(t => t.uid === uid);
+    if (existing >= 0) {
+      nfcTags[existing].audio = audio;
+    } else {
+      nfcTags.push({ uid, audio, name: 'Tag ' + (nfcTags.length + 1) });
+    }
+    renderNfc();
+    updateStats();
   }
 </script>
 </body>
