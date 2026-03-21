@@ -68,6 +68,7 @@ PIN_BTN_POWER   = 16   # Botón apagado
 
 # ── Rutas ────────────────────────────────────────────────────
 BASE_DIR         = os.path.expanduser("~/FaPi")
+EXIT_CONFIG_SIGNAL = os.path.join(BASE_DIR, "exit_config.signal")
 AUDIOS_DIR       = os.path.join(BASE_DIR, "audios")
 ASSIGNMENTS_FILE = os.path.join(BASE_DIR, "assignments.json")
 SOUNDS_DIR       = os.path.join(BASE_DIR, "sounds")
@@ -321,6 +322,16 @@ def entrar_modo_config():
 
     reproducir_y_esperar(SND_CONFIG_MODE)
 
+    # Esperar a que el hilo NFC entre en pausa antes de liberar el lector
+    time.sleep(0.5)
+    # Liberar el lector NFC para que server.py pueda usarlo
+    if nfc_reader is not None:
+        try:
+            nfc_reader.READER.Close_MFRC522()
+        except Exception:
+            pass
+    time.sleep(0.2)
+
     led_parpadeo(intervalo=0.2)
 
     venv_python   = os.path.join(BASE_DIR, "venv/bin/python3")
@@ -345,6 +356,13 @@ def salir_modo_config():
         print("  Servidor web detenido")
 
     led_fijo(True)
+
+    # Reiniciar el hilo NFC para que reabra el lector SPI
+    global nfc_reader, nfc_rdr
+    nfc_reader = None
+    nfc_rdr    = None
+    t = threading.Thread(target=nfc_loop, daemon=True)
+    t.start()
     print("  Listo para leer tags NFC")
 
 def on_btn_config():
@@ -374,6 +392,8 @@ def on_btn_power():
     subprocess.run(["sudo", "poweroff"])
 
 # ── NFC en hilo separado ──────────────────────────────────────
+nfc_reader = None
+nfc_rdr    = None
 def suprimir_salida():
     devnull    = os.open(os.devnull, os.O_WRONLY)
     old_stdout = os.dup(1)
@@ -390,11 +410,13 @@ def restaurar_salida(old_stdout, old_stderr):
     os.close(old_stderr)
 
 def nfc_loop():
-    global ultimo_uid, pausado_usuario
+    global ultimo_uid, pausado_usuario, nfc_reader, nfc_rdr
     try:
         from mfrc522 import SimpleMFRC522
-        reader = SimpleMFRC522()
-        rdr    = reader.READER
+        nfc_reader = SimpleMFRC522()
+        nfc_rdr    = nfc_reader.READER
+        reader     = nfc_reader
+        rdr        = nfc_rdr
         print("  Lector NFC listo")
         while True:
             if modo_config:
@@ -472,8 +494,12 @@ if audio_hello:
 
 # ── Bucle principal ───────────────────────────────────────────
 try:
-    from signal import pause as signal_pause
-    signal_pause()
+    while True:
+        # Comprobar señal de salida del modo configuración
+        if modo_config and os.path.exists(EXIT_CONFIG_SIGNAL):
+            os.remove(EXIT_CONFIG_SIGNAL)
+            salir_modo_config()
+        time.sleep(0.5)
 except KeyboardInterrupt:
     print("\nSaliendo...")
 finally:

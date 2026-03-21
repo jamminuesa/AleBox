@@ -68,33 +68,55 @@ def uid_to_hex(uid_int):
     h = format(uid_int, '08X')
     return ':'.join(h[i:i+2] for i in range(0, len(h), 2)).lstrip('0:').lstrip('0') or '00'
 
+def suprimir_salida():
+    import os
+    devnull    = os.open(os.devnull, os.O_WRONLY)
+    old_stdout = os.dup(1)
+    old_stderr = os.dup(2)
+    os.dup2(devnull, 1)
+    os.dup2(devnull, 2)
+    os.close(devnull)
+    return old_stdout, old_stderr
+
+def restaurar_salida(old_stdout, old_stderr):
+    import os
+    os.dup2(old_stdout, 1)
+    os.dup2(old_stderr, 2)
+    os.close(old_stdout)
+    os.close(old_stderr)
+
 def nfc_scan_worker():
     """Hilo que lee el RC522 hasta detectar un tag o que se pare."""
     try:
-        import RPi.GPIO as GPIO
         from mfrc522 import SimpleMFRC522
         reader = SimpleMFRC522()
-        try:
-            while True:
-                with nfc_lock:
-                    if not nfc_state["scanning"]:
-                        break
-                uid, _ = reader.read_no_block()
-                if uid:
-                    uid_hex = uid_to_hex(uid)
-                    assignments = load_assignments()
-                    assigned_audio = assignments.get(uid_hex, "")
-                    with nfc_lock:
-                        nfc_state["result"] = {
-                            "uid":              uid_hex,
-                            "already_assigned": bool(assigned_audio),
-                            "audio":            assigned_audio,
-                        }
-                        nfc_state["scanning"] = False
+        rdr    = reader.READER
+        while True:
+            with nfc_lock:
+                if not nfc_state["scanning"]:
                     break
-                time.sleep(0.1)
-        finally:
-            GPIO.cleanup()
+
+            old = suprimir_salida()
+            uid, _ = reader.read_no_block()
+            try:
+                rdr.MFRC522_StopCrypto1()
+            except Exception:
+                pass
+            restaurar_salida(*old)
+
+            if uid:
+                uid_hex        = uid_to_hex(uid)
+                assignments    = load_assignments()
+                assigned_audio = assignments.get(uid_hex, "")
+                with nfc_lock:
+                    nfc_state["result"] = {
+                        "uid":              uid_hex,
+                        "already_assigned": bool(assigned_audio),
+                        "audio":            assigned_audio,
+                    }
+                    nfc_state["scanning"] = False
+                break
+            time.sleep(0.2)
     except Exception as e:
         with nfc_lock:
             nfc_state["result"]   = {"error": str(e)}
@@ -186,9 +208,17 @@ def nfc_scan_result():
         result   = nfc_state["result"]
     return jsonify({"scanning": scanning, "result": result})
 
+@app.route('/api/exit_config', methods=['POST'])
+def exit_config():
+    """Crea un archivo de señal para que player.py salga del modo configuración."""
+    signal_file = os.path.join(BASE_DIR, "exit_config.signal")
+    open(signal_file, 'w').close()
+    return jsonify({"ok": True})
+
 # ── Arranque ─────────────────────────────────────────────────
 if __name__ == '__main__':
     print(f"🎵 FaPi server arrancando en http://0.0.0.0:{PORT}")
     print(f"   Audios en   : {AUDIOS_DIR}")
     print(f"   Asignaciones: {ASSIGNMENTS_FILE}")
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
+

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FaPi 🎵</title>
+  <title>AleBox 🎵</title>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Fredoka+One&display=swap" rel="stylesheet" />
   <style>
     :root {
@@ -455,7 +455,7 @@
 
 <header>
   <div class="header-icons">🎵 🎧 📻</div>
-  <h1>FaPi</h1>
+  <h1>AleBox</h1>
   <p>Panel de gestión de audios y etiquetas NFC</p>
 </header>
 
@@ -517,7 +517,7 @@
     </div>
 
     <button class="btn btn-mint btn-full" id="btnScan" onclick="startScan()" style="margin-bottom:16px;">
-      📡 Escanear etiqueta NFC
+      📡 Asignar etiqueta NFC
     </button>
 
     <div class="nfc-list" id="nfcList" style="flex:1;max-height:none;">
@@ -531,6 +531,12 @@
   </div>
 
 </main>
+
+  <div style="max-width:1100px;margin:0 auto;padding:0 24px 40px;">
+    <button onclick="salirConfig()" style="width:100%;padding:16px;background:#FF6B6B;color:white;border:none;border-radius:16px;font-family:'Fredoka One',cursive;font-size:1.2rem;cursor:pointer;box-shadow:0 4px 16px rgba(255,107,107,0.35);transition:transform 0.2s,box-shadow 0.2s;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 24px rgba(255,107,107,0.45)'" onmouseout="this.style.transform='';this.style.boxShadow='0 4px 16px rgba(255,107,107,0.35)'">
+      ▶️ Volver al reproductor
+    </button>
+  </div>
 
 <!-- ── Modal de escaneo NFC ───────────────────────────────── -->
 <div id="nfcModal" class="modal-overlay" style="display:none;" onclick="handleModalOverlayClick(event)">
@@ -807,6 +813,16 @@
     t.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  // ── Salir modo config ───────────────────────────────────────
+  async function salirConfig() {
+    try {
+      await fetch('/api/exit_config', { method: 'POST' });
+      showToast('✅ Volviendo al reproductor...');
+    } catch(e) {
+      showToast('❌ No se pudo conectar con el reproductor');
+    }
   }
 
   // ── Modal NFC scan ──────────────────────────────────────────
