@@ -20,6 +20,8 @@ import json
 import tempfile
 import threading
 import time
+import zipfile
+import shutil
 from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 
@@ -30,6 +32,7 @@ WEB_DIR          = os.path.join(BASE_DIR, "web")
 ASSIGNMENTS_FILE = os.path.join(BASE_DIR, "assignments.json")
 TEMP_DIR         = os.path.join(BASE_DIR, "tmp")
 ALLOWED_EXT      = {"mp3", "wav", "ogg", "m4a"}
+ALLOWED_ZIP      = {"zip"}
 PORT             = 8000
 
 os.makedirs(AUDIOS_DIR, exist_ok=True)
@@ -136,7 +139,91 @@ def get_audios():
             files.append({"name": f, "size": size})
     return jsonify(files)
 
+@app.route('/api/folders', methods=['GET'])
+def get_folders():
+    """Lista subcarpetas de audios (playlists)."""
+    folders = []
+    for name in sorted(os.listdir(AUDIOS_DIR)):
+        path = os.path.join(AUDIOS_DIR, name)
+        if os.path.isdir(path):
+            tracks = sorted([
+                f for f in os.listdir(path)
+                if f.lower().rsplit('.', 1)[-1] in ALLOWED_EXT
+            ])
+            folders.append({"name": name, "tracks": tracks, "count": len(tracks)})
+    return jsonify(folders)
+
+@app.route('/api/upload_zip', methods=['POST'])
+def upload_zip():
+    """Sube un ZIP, extrae los audios compatibles y crea una subcarpeta."""
+    if 'file' not in request.files:
+        return jsonify({"error": "No se recibió archivo"}), 400
+    file = request.files['file']
+    if not file.filename.lower().endswith('.zip'):
+        return jsonify({"error": "Solo se admiten archivos .zip"}), 400
+
+    folder_name = secure_filename(file.filename[:-4])  # nombre sin .zip
+    folder_path = os.path.join(AUDIOS_DIR, folder_name)
+    os.makedirs(folder_path, exist_ok=True)
+
+    zip_tmp = os.path.join(TEMP_DIR, secure_filename(file.filename))
+    file.save(zip_tmp)
+
+    extracted = []
+    rejected  = []
+    try:
+        with zipfile.ZipFile(zip_tmp, 'r') as z:
+            for member in z.namelist():
+                basename = os.path.basename(member)
+                if not basename:
+                    continue
+                ext = basename.rsplit('.', 1)[-1].lower() if '.' in basename else ''
+                if ext in ALLOWED_EXT:
+                    safe_name = secure_filename(basename)
+                    dest = os.path.join(folder_path, safe_name)
+                    with z.open(member) as src, open(dest, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    extracted.append(safe_name)
+                else:
+                    if basename:
+                        rejected.append(basename)
+    except zipfile.BadZipFile:
+        shutil.rmtree(folder_path, ignore_errors=True)
+        return jsonify({"error": "El archivo ZIP no es válido"}), 400
+    finally:
+        try:
+            os.remove(zip_tmp)
+        except Exception:
+            pass
+
+    if not extracted:
+        shutil.rmtree(folder_path, ignore_errors=True)
+        return jsonify({"error": "El ZIP no contenía audios compatibles"}), 400
+
+    return jsonify({
+        "folder": folder_name,
+        "extracted": sorted(extracted),
+        "rejected": rejected
+    }), 201
+
+@app.route('/api/folder/<foldername>', methods=['DELETE'])
+def delete_folder(foldername):
+    foldername = secure_filename(foldername)
+    path = os.path.join(AUDIOS_DIR, foldername)
+    if not os.path.isdir(path):
+        return jsonify({"error": "Carpeta no encontrada"}), 404
+    shutil.rmtree(path)
+    # Limpiar asignaciones que apunten a esta carpeta
+    assignments = load_assignments()
+    assignments = {
+        uid: val for uid, val in assignments.items()
+        if not (isinstance(val, dict) and val.get("folder") == foldername)
+    }
+    save_assignments(assignments)
+    return jsonify({"ok": True})
+
 @app.route('/api/upload', methods=['POST'])
+
 def upload_audio():
     if 'file' not in request.files:
         return jsonify({"error": "No se recibió ningún archivo"}), 400
@@ -221,4 +308,3 @@ if __name__ == '__main__':
     print(f"   Audios en   : {AUDIOS_DIR}")
     print(f"   Asignaciones: {ASSIGNMENTS_FILE}")
     app.run(host='0.0.0.0', port=PORT, debug=False, threaded=True)
-

@@ -486,8 +486,8 @@
     <div class="upload-zone" id="uploadZone">
       <div class="upload-icon">☁️</div>
       <p>Arrastra tu archivo aquí</p>
-      <small>o haz clic para seleccionar · MP3, WAV, OGG, M4A</small>
-      <input type="file" id="fileInput" accept=".mp3,.wav,.ogg,.m4a" multiple />
+      <small>o haz clic para seleccionar · MP3, WAV, OGG, M4A · ZIP (playlist)</small>
+      <input type="file" id="fileInput" accept=".mp3,.wav,.ogg,.m4a,.zip" multiple />
     </div>
     <div class="progress-wrap" id="progressWrap">
       <div class="progress-bar" id="progressBar"></div>
@@ -502,11 +502,13 @@
     <div class="card-title">
       <span class="icon">🎼</span> Biblioteca
     </div>
+    <div style="font-family:'Fredoka One',cursive;font-size:1rem;color:var(--muted);margin-bottom:8px;">🎵 Archivos individuales</div>
     <div class="audio-list" id="audioList">
-      <div class="empty-state">
-        <span>🎶</span>
-        Aún no hay audios.<br>¡Sube el primero!
-      </div>
+      <div class="empty-state"><span>🎶</span>Aún no hay audios.<br>¡Sube el primero!</div>
+    </div>
+    <div style="font-family:'Fredoka One',cursive;font-size:1rem;color:var(--muted);margin:16px 0 8px;">📂 Listas de reproducción</div>
+    <div class="audio-list" id="folderList">
+      <div class="empty-state"><span>📂</span>Sin listas aún.<br>Sube un ZIP para crear una.</div>
     </div>
   </div>
 
@@ -558,10 +560,16 @@
       <h2 class="modal-title">¡Etiqueta nueva!</h2>
       <p class="modal-subtitle" id="modalNewUid"></p>
       <div style="margin:20px 0;">
-        <label style="font-weight:800;font-size:0.88rem;display:block;margin-bottom:8px;">Asignar audio:</label>
-        <select id="modalNewSelect" class="modal-select">
+        <label style="font-weight:800;font-size:0.88rem;display:block;margin-bottom:8px;">Asignar audio o lista:</label>
+        <select id="modalNewSelect" class="modal-select" onchange="onModalSelectChange('New')">
           <option value="">— Sin asignar —</option>
         </select>
+        <div id="modalNewShuffle" style="display:none;margin-top:10px;background:#F0FFF4;border-radius:10px;padding:10px 14px;border:2px solid var(--mint);">
+          <label style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:0.88rem;cursor:pointer;">
+            <input type="checkbox" id="modalNewShuffleCheck" style="width:18px;height:18px;cursor:pointer;">
+            Reproducir en orden aleatorio
+          </label>
+        </div>
       </div>
       <div style="display:flex;gap:10px;">
         <button class="btn btn-coral" style="flex:1;" onclick="cancelModal()">✕ Cancelar</button>
@@ -577,7 +585,13 @@
       <div class="modal-current-assignment" id="modalCurrentAssignment"></div>
       <div style="margin:16px 0;">
         <label style="font-weight:800;font-size:0.88rem;display:block;margin-bottom:8px;">Cambiar a:</label>
-        <select id="modalExistingSelect" class="modal-select"></select>
+        <select id="modalExistingSelect" class="modal-select" onchange="onModalSelectChange('Existing')"></select>
+        <div id="modalExistingShuffle" style="display:none;margin-top:10px;background:#F0FFF4;border-radius:10px;padding:10px 14px;border:2px solid var(--mint);">
+          <label style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:0.88rem;cursor:pointer;">
+            <input type="checkbox" id="modalExistingShuffleCheck" style="width:18px;height:18px;cursor:pointer;">
+            Reproducir en orden aleatorio
+          </label>
+        </div>
       </div>
       <div id="modalConfirmChange" style="display:none;background:#FFF3C4;border-radius:12px;padding:14px;margin-bottom:16px;border:2px solid var(--yellow);">
         <p style="font-weight:700;font-size:0.88rem;color:#6B4C00;margin-bottom:10px;">⚠️ ¿Confirmas el cambio?</p>
@@ -601,22 +615,29 @@
 
 <script>
   // ── Estado ─────────────────────────────────────────────────
-  let audios = [];
-  let nfcTags = [];
+  let audios   = [];
+  let folders  = [];   // listas de reproducción (subcarpetas)
+  let nfcTags  = [];
 
   // ── Carga inicial desde servidor ────────────────────────────
   async function loadInitialData() {
     try {
-      const [audiosRes, assignRes] = await Promise.all([
+      const [audiosRes, foldersRes, assignRes] = await Promise.all([
         fetch('/api/audios'),
+        fetch('/api/folders'),
         fetch('/api/assignments')
       ]);
-      audios = await audiosRes.json();
+      audios  = await audiosRes.json();
+      folders = await foldersRes.json();
       const assignments = await assignRes.json();
-      nfcTags = Object.entries(assignments).map(([uid, audio], i) => ({
-        uid, audio, name: 'Tag ' + (i + 1)
+      nfcTags = Object.entries(assignments).map(([uid, val], i) => ({
+        uid,
+        audio: typeof val === 'string' ? val : null,
+        folder: typeof val === 'object' ? val : null,
+        name: 'Tag ' + (i + 1)
       }));
       renderAudios();
+      renderFolders();
       renderNfc();
       updateStats();
     } catch(e) {
@@ -641,17 +662,14 @@
 
   function handleFiles(files) {
     [...files].forEach(file => {
-      const allowed = ['audio/mpeg','audio/wav','audio/ogg','audio/mp3'];
       const ext = file.name.split('.').pop().toLowerCase();
-      if (!['mp3','wav','ogg','m4a'].includes(ext)) {
-        showToast('⚠️ Solo se permiten MP3, WAV, OGG o M4A');
-        return;
+      if (ext === 'zip') {
+        uploadZip(file);
+      } else if (['mp3','wav','ogg','m4a'].includes(ext)) {
+        simulateUpload(file);
+      } else {
+        showToast('⚠️ Formato no soportado: ' + ext);
       }
-      if (audios.find(a => a.name === file.name)) {
-        showToast('⚠️ Ya existe un audio con ese nombre');
-        return;
-      }
-      simulateUpload(file);
     });
   }
 
@@ -660,13 +678,11 @@
     const bar  = document.getElementById('progressBar');
     wrap.style.display = 'block';
     bar.style.width = '0%';
-
     let p = 0;
     const iv = setInterval(() => {
       p = Math.min(p + Math.random() * 15 + 5, 90);
       bar.style.width = p + '%';
     }, 150);
-
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -677,17 +693,45 @@
         bar.style.width = '100%';
         setTimeout(() => { wrap.style.display = 'none'; }, 500);
         audios.push({ name: data.name, size: data.size });
-        renderAudios();
-        updateStats();
-        updateNfcSelects();
+        renderAudios(); updateStats(); updateNfcSelects();
         showToast('✅ ' + data.name + ' subido');
       } else {
         wrap.style.display = 'none';
         showToast('❌ ' + (data.error || 'Error al subir'));
       }
     } catch(e) {
+      clearInterval(iv); wrap.style.display = 'none';
+      showToast('❌ No se pudo conectar con el servidor');
+    }
+  }
+
+  async function uploadZip(file) {
+    const wrap = document.getElementById('progressWrap');
+    const bar  = document.getElementById('progressBar');
+    wrap.style.display = 'block'; bar.style.width = '0%';
+    let p = 0;
+    const iv = setInterval(() => {
+      p = Math.min(p + Math.random() * 8 + 2, 90);
+      bar.style.width = p + '%';
+    }, 200);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res  = await fetch('/api/upload_zip', { method: 'POST', body: formData });
+      const data = await res.json();
       clearInterval(iv);
-      wrap.style.display = 'none';
+      if (res.ok) {
+        bar.style.width = '100%';
+        setTimeout(() => { wrap.style.display = 'none'; }, 500);
+        folders.push({ name: data.folder, tracks: data.extracted, count: data.extracted.length });
+        renderFolders(); updateStats(); updateNfcSelects();
+        showToast('✅ Lista "' + data.folder + '" creada (' + data.extracted.length + ' pistas)');
+      } else {
+        wrap.style.display = 'none';
+        showToast('❌ ' + (data.error || 'Error al subir ZIP'));
+      }
+    } catch(e) {
+      clearInterval(iv); wrap.style.display = 'none';
       showToast('❌ No se pudo conectar con el servidor');
     }
   }
@@ -709,6 +753,22 @@
     `).join('');
   }
 
+  function renderFolders() {
+    const list = document.getElementById('folderList');
+    if (folders.length === 0) {
+      list.innerHTML = `<div class="empty-state"><span>📂</span>Sin listas aún.<br>Sube un ZIP para crear una.</div>`;
+      return;
+    }
+    list.innerHTML = folders.map((f, i) => `
+      <div class="audio-item" data-i="${i}">
+        <span class="audio-icon">📂</span>
+        <span class="audio-name" title="${f.name}">${f.name}</span>
+        <span class="audio-size">${f.count} pistas</span>
+        <button class="btn-delete" onclick="deleteFolder(event,${i})" title="Eliminar">🗑️</button>
+      </div>
+    `).join('');
+  }
+
   function selectAudio(i) {
     document.querySelectorAll('.audio-item').forEach(el => el.classList.remove('selected'));
     document.querySelector(`.audio-item[data-i="${i}"]`)?.classList.add('selected');
@@ -717,16 +777,21 @@
   async function deleteAudio(e, i) {
     e.stopPropagation();
     const name = audios[i].name;
-    try {
-      await fetch('/api/audio/' + encodeURIComponent(name), { method: 'DELETE' });
-    } catch(e) { /* si no hay servidor, borramos solo en local */ }
+    try { await fetch('/api/audio/' + encodeURIComponent(name), { method: 'DELETE' }); } catch(e) {}
     audios.splice(i, 1);
-    nfcTags.forEach(t => { if (t.audio === name) t.audio = ''; });
-    renderAudios();
-    renderNfc();
-    updateStats();
-    updateNfcSelects();
+    nfcTags.forEach(t => { if (t.audio === name) t.audio = null; });
+    renderAudios(); renderNfc(); updateStats(); updateNfcSelects();
     showToast('🗑️ ' + name + ' eliminado');
+  }
+
+  async function deleteFolder(e, i) {
+    e.stopPropagation();
+    const name = folders[i].name;
+    try { await fetch('/api/folder/' + encodeURIComponent(name), { method: 'DELETE' }); } catch(e) {}
+    folders.splice(i, 1);
+    nfcTags.forEach(t => { if (t.folder && t.folder.folder === name) t.folder = null; });
+    renderFolders(); renderNfc(); updateStats(); updateNfcSelects();
+    showToast('🗑️ Lista "' + name + '" eliminada');
   }
 
   function getAudioIcon(name) {
@@ -750,18 +815,25 @@
       list.innerHTML = `<div class="empty-state"><span>📡</span>Sin etiquetas NFC.<br>Escanea tu primer tag.</div>`;
       return;
     }
-    list.innerHTML = nfcTags.map((t, i) => `
+    list.innerHTML = nfcTags.map((t, i) => {
+      let label = '— Sin asignar —';
+      let color = 'var(--muted)';
+      if (t.audio) { label = '🎵 ' + t.audio; color = 'var(--sky)'; }
+      else if (t.folder) {
+        const shuffle = t.folder.shuffle ? ' · aleatorio' : ' · ordenado';
+        label = '📂 ' + t.folder.folder + shuffle;
+        color = 'var(--mint)';
+      }
+      return `
       <div class="nfc-item">
         <div class="nfc-header">
           <span class="nfc-badge">NFC ${i+1}</span>
           <span class="nfc-uid">${t.uid}</span>
           <button class="btn-delete" onclick="deleteNfc(${i})" title="Eliminar">✕</button>
         </div>
-        <div style="font-size:0.85rem;font-weight:700;color:${t.audio ? 'var(--sky)' : 'var(--muted)'};">
-          ${t.audio ? '🎵 ' + t.audio : '— Sin asignar —'}
-        </div>
-      </div>
-    `).join('');
+        <div style="font-size:0.85rem;font-weight:700;color:${color};">${label}</div>
+      </div>`;
+    }).join('');
   }
 
   async function deleteNfc(i) {
@@ -776,18 +848,31 @@
     renderNfc();
   }
 
+  function onModalSelectChange(which) {
+    const sel      = document.getElementById('modal' + which + 'Select');
+    const shuffle  = document.getElementById('modal' + which + 'Shuffle');
+    const val      = sel.value;
+    // Show shuffle option only for folder selections (prefixed with "folder:")
+    shuffle.style.display = val.startsWith('folder:') ? 'block' : 'none';
+  }
+
   // ── Stats ───────────────────────────────────────────────────
   function updateStats() {
-    document.getElementById('stat-audios').textContent  = audios.length + ' audio' + (audios.length!==1?'s':'');
+    const totalAudios = audios.length + folders.length;
+    document.getElementById('stat-audios').textContent  = totalAudios + ' audio' + (totalAudios!==1?'s':'');
     document.getElementById('stat-nfc').textContent     = nfcTags.length + ' etiqueta' + (nfcTags.length!==1?'s':'') + ' NFC';
-    const assigned = nfcTags.filter(t => t.audio).length;
+    const assigned = nfcTags.filter(t => t.audio || t.folder).length;
     document.getElementById('stat-assigned').textContent = assigned + ' asignación' + (assigned!==1?'es':'');
   }
 
   // ── Persistir asignaciones (se llama automáticamente) ───────
   async function persistAssignments() {
     const config = {
-      assignments: Object.fromEntries(nfcTags.filter(t => t.audio).map(t => [t.uid, t.audio]))
+      assignments: Object.fromEntries(
+        nfcTags
+          .filter(t => t.audio || t.folder)
+          .map(t => [t.uid, t.audio ? t.audio : t.folder])
+      )
     };
     try {
       const res = await fetch('/api/save', {
@@ -889,41 +974,68 @@
     } catch(e) { /* red momentáneamente caída, reintenta en el próximo tick */ }
   }
 
+  function buildSelectOptions(currentVal) {
+    const audioOpts  = audios.map(a =>
+      `<option value="${a.name}" ${a.name === currentVal ? 'selected' : ''}>${getAudioIcon(a.name)} ${a.name}</option>`
+    ).join('');
+    const folderOpts = folders.map(f =>
+      `<option value="folder:${f.name}" ${'folder:'+f.name === currentVal ? 'selected' : ''}>📂 ${f.name} (${f.count} pistas)</option>`
+    ).join('');
+    return '<option value="">— Sin asignar —</option>' + audioOpts + folderOpts;
+  }
+
   function showNewModal(uid) {
     document.getElementById('modalNewUid').textContent = 'UID: ' + uid;
-    const sel = document.getElementById('modalNewSelect');
-    sel.innerHTML = '<option value="">— Sin asignar —</option>' +
-      audios.map(a => `<option value="${a.name}">${a.name}</option>`).join('');
+    document.getElementById('modalNewSelect').innerHTML = buildSelectOptions('');
+    document.getElementById('modalNewShuffle').style.display = 'none';
     showModalPanel('modalNew');
   }
 
   function showExistingModal(uid, currentAudio) {
     document.getElementById('modalExistingUid').textContent = 'UID: ' + uid;
+    const existing = nfcTags.find(t => t.uid === uid);
+    let currentVal = currentAudio || '';
+    let currentLabel = '🎵 ' + (currentAudio || 'ninguno');
+    if (existing && existing.folder) {
+      currentVal   = 'folder:' + existing.folder.folder;
+      currentLabel = '📂 ' + existing.folder.folder;
+    }
     document.getElementById('modalCurrentAssignment').innerHTML =
-      '🎵 Actualmente asignado a: <strong>' + (currentAudio || 'ninguno') + '</strong>';
-    const sel = document.getElementById('modalExistingSelect');
-    sel.innerHTML = '<option value="">— Sin asignar —</option>' +
-      audios.map(a => `<option value="${a.name}" ${a.name === currentAudio ? 'selected' : ''}>${a.name}</option>`).join('');
+      'Actualmente: <strong>' + currentLabel + '</strong>';
+    document.getElementById('modalExistingSelect').innerHTML = buildSelectOptions(currentVal);
+    // Mostrar shuffle si es carpeta
+    if (existing && existing.folder) {
+      document.getElementById('modalExistingShuffle').style.display = 'block';
+      document.getElementById('modalExistingShuffleCheck').checked = existing.folder.shuffle || false;
+    } else {
+      document.getElementById('modalExistingShuffle').style.display = 'none';
+    }
     document.getElementById('modalConfirmChange').style.display = 'none';
     showModalPanel('modalExisting');
   }
 
   async function confirmNew() {
-    const audio = document.getElementById('modalNewSelect').value;
-    applyAssignment(scannedUid, audio);
+    const val = document.getElementById('modalNewSelect').value;
+    if (val.startsWith('folder:')) {
+      const folderName = val.replace('folder:', '');
+      const shuffle    = document.getElementById('modalNewShuffleCheck').checked;
+      applyFolderAssignment(scannedUid, folderName, shuffle);
+      showToast('✅ Tag asignado a lista "' + folderName + '"');
+    } else {
+      applyAssignment(scannedUid, val);
+      showToast('✅ ' + scannedUid + (val ? ' → ' + val : ' sin asignar'));
+    }
     hideModal();
     await persistAssignments();
-    showToast('✅ ' + scannedUid + (audio ? ' → ' + audio : ' guardado sin audio'));
   }
 
   function requestConfirmChange() {
-    const newAudio = document.getElementById('modalExistingSelect').value;
-    const oldAudio = scannedAudio;
-    if (newAudio === oldAudio) { showToast('ℹ️ No hay cambios'); return; }
-    const from = oldAudio || 'ninguno';
-    const to   = newAudio || 'ninguno';
+    const newVal  = document.getElementById('modalExistingSelect').value;
+    const existing = nfcTags.find(t => t.uid === scannedUid);
+    const oldVal  = existing && existing.folder ? 'folder:' + existing.folder.folder : (scannedAudio || 'ninguno');
+    if (newVal === oldVal) { showToast('ℹ️ No hay cambios'); return; }
     document.getElementById('modalConfirmText').textContent =
-      'Cambiar de "' + from + '" → "' + to + '"';
+      'Cambiar de "' + oldVal + '" → "' + (newVal || 'ninguno') + '"';
     document.getElementById('modalConfirmChange').style.display = 'block';
   }
 
@@ -932,11 +1044,17 @@
   }
 
   async function confirmChange() {
-    const newAudio = document.getElementById('modalExistingSelect').value;
-    applyAssignment(scannedUid, newAudio);
+    const val = document.getElementById('modalExistingSelect').value;
+    if (val.startsWith('folder:')) {
+      const folderName = val.replace('folder:', '');
+      const shuffle    = document.getElementById('modalExistingShuffleCheck').checked;
+      applyFolderAssignment(scannedUid, folderName, shuffle);
+    } else {
+      applyAssignment(scannedUid, val);
+    }
     hideModal();
     await persistAssignments();
-    showToast('✅ Asignación actualizada para ' + scannedUid);
+    showToast('✅ Asignación actualizada');
   }
 
   function cancelModal() {
@@ -947,9 +1065,23 @@
   function applyAssignment(uid, audio) {
     const existing = nfcTags.findIndex(t => t.uid === uid);
     if (existing >= 0) {
-      nfcTags[existing].audio = audio;
+      nfcTags[existing].audio  = audio;
+      nfcTags[existing].folder = null;
     } else {
-      nfcTags.push({ uid, audio, name: 'Tag ' + (nfcTags.length + 1) });
+      nfcTags.push({ uid, audio, folder: null, name: 'Tag ' + (nfcTags.length + 1) });
+    }
+    renderNfc();
+    updateStats();
+  }
+
+  function applyFolderAssignment(uid, folderName, shuffle) {
+    const folderObj = { folder: folderName, shuffle };
+    const existing  = nfcTags.findIndex(t => t.uid === uid);
+    if (existing >= 0) {
+      nfcTags[existing].audio  = null;
+      nfcTags[existing].folder = folderObj;
+    } else {
+      nfcTags.push({ uid, audio: null, folder: folderObj, name: 'Tag ' + (nfcTags.length + 1) });
     }
     renderNfc();
     updateStats();
