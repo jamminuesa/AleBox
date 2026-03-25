@@ -50,7 +50,7 @@ LED_PATH           = "/sys/class/leds/ACT/brightness"
 LED_TRIGGER_PATH   = "/sys/class/leds/ACT/trigger"
 
 # ── Configuración ────────────────────────────────────────────
-VOLUME        = 30
+VOLUME        = 40
 VOLUME_STEP   = 2
 VOLUME_MAX    = 80
 SKIP_SECONDS  = 30    # segundos de avance/retroceso rápido
