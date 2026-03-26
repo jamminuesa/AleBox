@@ -50,7 +50,7 @@ LED_PATH           = "/sys/class/leds/ACT/brightness"
 LED_TRIGGER_PATH   = "/sys/class/leds/ACT/trigger"
 
 # ── Configuración ────────────────────────────────────────────
-VOLUME        = 40
+VOLUME        = 48
 VOLUME_STEP   = 2
 VOLUME_MAX    = 80
 SKIP_SECONDS  = 30    # segundos de avance/retroceso rápido
@@ -75,6 +75,7 @@ pausado_usuario = False
 ultimo_uid      = None
 modo_repetir    = False  # no usado actualmente (reservado)
 arranque_listo  = False  # False hasta que el audio de bienvenida termina
+seek_lock       = threading.Lock()
 
 # ── GPIO ─────────────────────────────────────────────────────
 amp_sd     = LED(PIN_SD)
@@ -326,23 +327,34 @@ def toggle_play_pause():
         print("  ▶ Reproduciendo")
 
 def _seek(nuevo_ms, etiqueta):
+    if not seek_lock.acquire(blocking = False):
+        return
     """Salta a nuevo_ms de forma limpia: mutea, salta, espera buffer, desmutea."""
     estaba_playing = player.get_state() == vlc.State.Playing
     amp_mute(True)
     player.set_time(nuevo_ms)
     # Esperar a que VLC rellene el buffer desde la nueva posición
-    if estaba_playing:
-        for _ in range(30):
-            time.sleep(0.05)
-            if player.get_state() == vlc.State.Playing:
-                break
-        time.sleep(0.05)   # margen extra para estabilizar el stream I2S
+    def _desmutear():
+        time.sleep(0.7)
         amp_mute(False)
+        seek_lock.release()
+
+    def _desmutearpro():
+        if estaba_playing:
+            for _ in range(30):
+                time.sleep(0.05)
+                if player.get_state() == vlc.State.Playing:
+                    break
+            time.sleep(0.05)   # margen extra para estabilizar el stream I2S
+            amp_mute(False)
+
+    threading.Thread(target=_desmutear, daemon=True).start()
     print(f"  {etiqueta} → {nuevo_ms//1000}s")
 
 def avanzar_30s():
     if player.get_state() not in (vlc.State.Playing, vlc.State.Paused):
         return
+    amp_mute(True)
     length  = player.get_length()
     current = player.get_time()
     nuevo   = min(current + SKIP_SECONDS * 1000, length - 1000)
