@@ -26,6 +26,7 @@ from gpiozero import LED, Button
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'aux'))
 from ky040 import KY040
+from hotspot import HotspotManager
 
 # ── Pines ────────────────────────────────────────────────────
 PIN_SD         = 24
@@ -50,9 +51,9 @@ LED_PATH           = "/sys/class/leds/ACT/brightness"
 LED_TRIGGER_PATH   = "/sys/class/leds/ACT/trigger"
 
 # ── Configuración ────────────────────────────────────────────
-VOLUME        = 48
-VOLUME_STEP   = 2
-VOLUME_MAX    = 80
+VOLUME        = 50
+VOLUME_STEP   = 5
+VOLUME_MAX    = 150
 SKIP_SECONDS  = 30    # segundos de avance/retroceso rápido
 HOLD_TIME     = 1.0   # segundos para considerar pulsación larga
 PREV_RESTART  = 10    # segundos al inicio para retroceder a pista anterior
@@ -69,13 +70,13 @@ playlist_uid    = None   # UID al que pertenece la playlist actual
 playlist_shuffle = False
 modo_config     = False
 server_proceso  = None
+hotspot         = HotspotManager()
 led_thread      = None
 stop_led        = threading.Event()
 pausado_usuario = False
 ultimo_uid      = None
 modo_repetir    = False  # no usado actualmente (reservado)
 arranque_listo  = False  # False hasta que el audio de bienvenida termina
-seek_lock       = threading.Lock()
 
 # ── GPIO ─────────────────────────────────────────────────────
 amp_sd     = LED(PIN_SD)
@@ -327,26 +328,19 @@ def toggle_play_pause():
         print("  ▶ Reproduciendo")
 
 def _seek(nuevo_ms, etiqueta):
-    if not seek_lock.acquire(blocking = False):
+    """Salta a nuevo_ms de forma limpia: mutea, salta y desmutea en hilo separado.
+    El lock evita que dos seeks se solapen."""
+    if not seek_lock.acquire(blocking=False):
         return
-    """Salta a nuevo_ms de forma limpia: mutea, salta, espera buffer, desmutea."""
     estaba_playing = player.get_state() == vlc.State.Playing
     amp_mute(True)
     player.set_time(nuevo_ms)
-    # Esperar a que VLC rellene el buffer desde la nueva posición
+
     def _desmutear():
         time.sleep(0.7)
-        amp_mute(False)
-        seek_lock.release()
-
-    def _desmutearpro():
         if estaba_playing:
-            for _ in range(30):
-                time.sleep(0.05)
-                if player.get_state() == vlc.State.Playing:
-                    break
-            time.sleep(0.05)   # margen extra para estabilizar el stream I2S
             amp_mute(False)
+        seek_lock.release()
 
     threading.Thread(target=_desmutear, daemon=True).start()
     print(f"  {etiqueta} → {nuevo_ms//1000}s")
@@ -354,7 +348,6 @@ def _seek(nuevo_ms, etiqueta):
 def avanzar_30s():
     if player.get_state() not in (vlc.State.Playing, vlc.State.Paused):
         return
-    amp_mute(True)
     length  = player.get_length()
     current = player.get_time()
     nuevo   = min(current + SKIP_SECONDS * 1000, length - 1000)
@@ -462,17 +455,16 @@ def entrar_modo_config():
 
     print("\n  Comprobando red...")
     if not hay_red():
-        print("  Sin red")
-        reproducir_y_esperar(SND_NO_NETWORK)
-        return
-
+        print("  Sin red. Iniciando hotspot temporal...")
+        hotspot.start()
+	
+    
     modo_config = True
     print("\n── Modo configuración ──────────────────")
     if player.get_state() == vlc.State.Playing:
         player.pause()
     amp_mute(True)
     reproducir_y_esperar(SND_CONFIG_MODE)
-
     time.sleep(0.5)
     if nfc_reader is not None:
         try:
@@ -497,6 +489,8 @@ def salir_modo_config():
         server_proceso.terminate()
         server_proceso.wait()
         print("  Servidor detenido")
+    if hotspot.active:
+        hotspot.stop()
     led_fijo(True)
     nfc_reader = None
     nfc_rdr    = None
@@ -519,6 +513,8 @@ def on_btn_power():
         reproducir_y_esperar(audio)
     if server_proceso and server_proceso.poll() is None:
         server_proceso.terminate()
+    if hotspot.active:
+        hotspot.stop()
     encoder.close()
     led_restaurar()
     print("  Apagando el sistema...")

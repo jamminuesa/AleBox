@@ -130,6 +130,12 @@ def nfc_scan_worker():
 def index():
     return send_from_directory(WEB_DIR, 'index.html')
 
+	
+@app.route('/fonts/<path:filename>')
+def fonts(filename):
+    return send_from_directory(os.path.join(WEB_DIR, 'fonts'), filename)
+
+
 @app.route('/api/audios', methods=['GET'])
 def get_audios():
     files = []
